@@ -5,12 +5,13 @@ use crate::fl;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::iced::{Alignment, Length, Subscription, time};
 use cosmic::prelude::*;
-use cosmic::widget::{self, icon, menu, nav_bar};
+use cosmic::widget::{self, icon, menu, nav_bar, button, container, column, row, text};
 use cosmic::{cosmic_theme, theme};
 use futures_util::SinkExt;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
@@ -28,6 +29,12 @@ pub struct AppModel {
     key_binds: HashMap<menu::KeyBind, MenuAction>,
     // Configuration data that persists between application runs.
     config: Config,
+    /// Current time for clock display
+    current_time: String,
+    /// Timer duration in seconds
+    timer_seconds: u64,
+    /// Timer is running
+    timer_running: bool,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -38,6 +45,12 @@ pub enum Message {
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
     LaunchUrl(String),
+    UpdateTime,
+    StartTimer,
+    PauseTimer,
+    ResetTimer,
+    IncrementTimer,
+    DecrementTimer,
 }
 
 /// Create a COSMIC application from the app model
@@ -72,19 +85,19 @@ impl cosmic::Application for AppModel {
 
         nav.insert()
             .text(fl!("page-id", num = 1))
-            .data::<Page>(Page::Page1)
-            .icon(icon::from_name("applications-science-symbolic"))
+            .data::<Page>(Page::Clock)
+            .icon(icon::from_name("appointment-soon-symbolic"))
             .activate();
 
         nav.insert()
             .text(fl!("page-id", num = 2))
-            .data::<Page>(Page::Page2)
-            .icon(icon::from_name("applications-system-symbolic"));
+            .data::<Page>(Page::Timer)
+            .icon(icon::from_name("chronometer-symbolic"));
 
         nav.insert()
             .text(fl!("page-id", num = 3))
-            .data::<Page>(Page::Page3)
-            .icon(icon::from_name("applications-games-symbolic"));
+            .data::<Page>(Page::Alarms)
+            .icon(icon::from_name("alarm-symbolic"));
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -105,6 +118,9 @@ impl cosmic::Application for AppModel {
                     }
                 })
                 .unwrap_or_default(),
+            current_time: String::from("00:00:00"),
+            timer_seconds: 300,
+            timer_running: false,
         };
 
         // Create a startup command that sets the window title.
@@ -151,12 +167,20 @@ impl cosmic::Application for AppModel {
     /// Application events will be processed through the view. Any messages emitted by
     /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<Self::Message> {
-        widget::text::title1(fl!("welcome"))
-            .apply(widget::container)
+        let spacing = &theme::active().cosmic().spacing;
+        let active_page = self.nav.active_data::<Page>();
+
+        let content = match active_page {
+            Some(Page::Clock) => self.clock_page(),
+            Some(Page::Timer) => self.timer_page(),
+            Some(Page::Alarms) => self.alarms_page(),
+            None => Element::from(text("No page selected")),
+        };
+
+        container(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
+            .padding(spacing.space_m)
             .into()
     }
 
@@ -166,18 +190,10 @@ impl cosmic::Application for AppModel {
     /// emit messages to the application through a channel. They are started at the
     /// beginning of the application, and persist through its lifetime.
     fn subscription(&self) -> Subscription<Self::Message> {
-        struct MySubscription;
-
         Subscription::batch(vec![
-            // Create a subscription which emits updates through a channel.
-            Subscription::run_with_id(
-                std::any::TypeId::of::<MySubscription>(),
-                cosmic::iced::stream::channel(4, move |mut channel| async move {
-                    _ = channel.send(Message::SubscriptionChannel).await;
-
-                    futures_util::future::pending().await
-                }),
-            ),
+            // Update time every 500ms
+            time::every(std::time::Duration::from_millis(500))
+                .map(|_| Message::UpdateTime),
             // Watch for application configuration changes.
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
@@ -226,6 +242,49 @@ impl cosmic::Application for AppModel {
                     eprintln!("failed to open {url:?}: {err}");
                 }
             },
+
+            Message::UpdateTime => {
+                let now = std::time::SystemTime::now();
+                let duration = now
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+                
+                let secs = duration.as_secs();
+                let h = (secs / 3600) % 24;
+                let m = (secs / 60) % 60;
+                let s = secs % 60;
+                
+                self.current_time = format!("{:02}:{:02}:{:02}", h, m, s);
+
+                if self.timer_running && self.timer_seconds > 0 {
+                    self.timer_seconds -= 1;
+                }
+            }
+
+            Message::StartTimer => {
+                self.timer_running = true;
+            }
+
+            Message::PauseTimer => {
+                self.timer_running = false;
+            }
+
+            Message::ResetTimer => {
+                self.timer_running = false;
+                self.timer_seconds = 300;
+            }
+
+            Message::IncrementTimer => {
+                if !self.timer_running {
+                    self.timer_seconds += 60;
+                }
+            }
+
+            Message::DecrementTimer => {
+                if !self.timer_running && self.timer_seconds > 0 {
+                    self.timer_seconds = self.timer_seconds.saturating_sub(60);
+                }
+            }
         }
         Task::none()
     }
@@ -274,6 +333,125 @@ impl AppModel {
             .into()
     }
 
+    /// Clock page showing current time
+    pub fn clock_page(&self) -> Element<Message> {
+        let spacing = &theme::active().cosmic().spacing;
+        
+        column()
+            .push(
+                container(
+                    text::title1(&self.current_time)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center)
+                .padding(spacing.space_l)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(spacing.space_m)
+            .into()
+    }
+
+    /// Timer page
+    pub fn timer_page(&self) -> Element<Message> {
+        let spacing = &theme::active().cosmic().spacing;
+        
+        let minutes = self.timer_seconds / 60;
+        let seconds = self.timer_seconds % 60;
+        let timer_display = format!("{:02}:{:02}", minutes, seconds);
+
+        let button_row = row()
+            .push(
+                button(text("−").size(20))
+                    .on_press(Message::DecrementTimer)
+                    .width(Length::Fixed(60.0))
+                    .height(Length::Fixed(60.0))
+                    .padding(10)
+            )
+            .push(
+                if self.timer_running {
+                    button(text("Pause").horizontal_alignment(Horizontal::Center))
+                        .on_press(Message::PauseTimer)
+                        .width(Length::Fixed(100.0))
+                        .height(Length::Fixed(60.0))
+                        .padding(10)
+                } else {
+                    button(text("Start").horizontal_alignment(Horizontal::Center))
+                        .on_press(Message::StartTimer)
+                        .width(Length::Fixed(100.0))
+                        .height(Length::Fixed(60.0))
+                        .padding(10)
+                }
+            )
+            .push(
+                button(text("+").size(20))
+                    .on_press(Message::IncrementTimer)
+                    .width(Length::Fixed(60.0))
+                    .height(Length::Fixed(60.0))
+                    .padding(10)
+            )
+            .push(
+                button(text("Reset").horizontal_alignment(Horizontal::Center))
+                    .on_press(Message::ResetTimer)
+                    .width(Length::Fixed(80.0))
+                    .height(Length::Fixed(60.0))
+                    .padding(10)
+            )
+            .spacing(spacing.space_m)
+            .align_y(Vertical::Center);
+
+        column()
+            .push(
+                container(text::title1(&timer_display))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(200.0))
+                    .align_x(Horizontal::Center)
+                    .align_y(Vertical::Center)
+                    .padding(spacing.space_l)
+            )
+            .push(
+                container(button_row)
+                    .width(Length::Fill)
+                    .align_x(Horizontal::Center)
+                    .padding(spacing.space_m)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(spacing.space_m)
+            .align_x(Alignment::Center)
+            .into()
+    }
+
+    /// Alarms page
+    pub fn alarms_page(&self) -> Element<Message> {
+        let spacing = &theme::active().cosmic().spacing;
+        
+        column()
+            .push(text::title2("Alarms"))
+            .push(
+                container(
+                    column()
+                        .push(
+                            button(text("+ Add Alarm").horizontal_alignment(Horizontal::Center))
+                                .width(Length::Fixed(150.0))
+                                .height(Length::Fixed(50.0))
+                                .padding(10)
+                        )
+                        .push(text("No alarms set"))
+                        .spacing(spacing.space_m)
+                )
+                .padding(spacing.space_m)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(spacing.space_m)
+            .into()
+    }
+
     /// Updates the header and window titles.
     pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
         let mut window_title = fl!("app-title");
@@ -293,9 +471,9 @@ impl AppModel {
 
 /// The page to display in the application.
 pub enum Page {
-    Page1,
-    Page2,
-    Page3,
+    Clock,
+    Timer,
+    Alarms,
 }
 
 /// The context page to display in the context drawer.

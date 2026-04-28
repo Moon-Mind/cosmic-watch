@@ -46,31 +46,26 @@ sudo apt install pipewire-pulse
 ```bash
 # Clone the repository
 git clone https://github.com/Moon-Mind/cosmic-watch.git
-cd cosmic-watch
-
-# Install Rust dependencies
-cargo add chrono --features serde
-cargo add futures-util
-cargo add i18n-embed-fl
-cargo add notify-rust
-cargo add open
-cargo add rodio --features wav,vorbis --no-default-features
-cargo add rust-embed
-cargo add tokio --features full
+cd cosmic-watch/cosmic-watch
 
 # Build the application
-cargo build --release
+just build-release
 
 # Run the application
-cargo run
+just run
+
+# Install the application
+just install
 ```
 
 ### Development Setup
 
 ```bash
-# For development with hot reload
-cargo install cargo-watch
-cargo watch -x run
+# Run in development mode with debug build
+just run
+
+# Run with Rust backtrace for debugging
+RUST_BACKTRACE=full just run
 ```
 
 ## Configuration
@@ -123,20 +118,17 @@ features = [
 
 ```bash
 # Clean build
-cargo clean
-cargo build
+just clean
+just build-debug
 
 # Run in development mode
-cargo run
+just run
 
 # Release build
-cargo build --release
+just build-release
 
-# Run tests
-cargo test
-
-# Check code without building
-cargo check
+# Code quality check
+just check
 ```
 
 ### Localization Setup
@@ -193,33 +185,21 @@ notify-send "Test" "Notification test"
 ### Code Quality Commands
 
 ```bash
-# Format code
-cargo fmt
-
 # Lint code
-cargo clippy
+just check
 
-# Fix clippy warnings
-cargo clippy --fix
-
-# Security audit
-cargo audit
-
-# Update dependencies
-cargo update
+# Lint with JSON output (for IDEs)
+just check-json
 ```
 
 ### Debugging Commands
 
 ```bash
 # Run with debug output
-RUST_LOG=debug cargo run
+RUST_LOG=debug just run
 
 # Run with backtrace
-RUST_BACKTRACE=1 cargo run
-
-# Profile build time
-cargo build --timings
+RUST_BACKTRACE=full just run
 
 # Check binary size
 ls -lh target/release/cosmic-watch
@@ -285,7 +265,7 @@ git push
 
 1. **Launch the application**:
    ```bash
-   cargo run
+   just run
    ```
 
 2. **Navigate between features**:

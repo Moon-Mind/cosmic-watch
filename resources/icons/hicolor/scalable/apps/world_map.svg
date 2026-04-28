@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="200" viewBox="0 0 400 200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="200" fill="#e0eafc"/>
+  <g>
+    <!-- Simple world map shapes (abstract, not detailed) -->
+    <ellipse cx="100" cy="100" rx="80" ry="40" fill="#b2d8b2"/>
+    <ellipse cx="300" cy="100" rx="80" ry="40" fill="#b2d8b2"/>
+    <ellipse cx="200" cy="60" rx="40" ry="20" fill="#b2d8b2"/>
+    <ellipse cx="200" cy="140" rx="30" ry="15" fill="#b2d8b2"/>
+  </g>
+  <!-- Pin: will be drawn dynamically in app -->
+</svg>
