@@ -5,10 +5,10 @@ use crate::fl;
 use crate::notifications;
 use chrono::Timelike;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
-use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::iced::alignment::{Horizontal, Vertical}; // Keep Horizontal and Vertical
+use cosmic::iced::{Alignment, Length, Subscription, mouse, Rectangle}; // Keep Alignment, Length, Subscription
 use cosmic::prelude::*;
-use cosmic::widget::{self, icon, menu, nav_bar};
+use cosmic::widget::{self, canvas, icon, menu, nav_bar};
 use cosmic::{cosmic_theme, theme};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -79,6 +79,7 @@ StopTimer,
 ResetTimer,
 SetTimerMinutes(u32),
 SetTimerSeconds(u32),
+SetTimerDuration(Duration),
 // Alarm messages
     AddAlarm,
     EditAlarm(u32),
@@ -124,24 +125,24 @@ impl cosmic::Application for AppModel {
         nav.insert()
             .text(fl!("world-clock"))
             .data::<Page>(Page::WorldClock)
-            .icon(icon::from_name("preferences-system-time-symbolic"))
+            .icon(icon::from_name("access-time-symbolic"))
             .activate();
 
         nav.insert()
             .text(fl!("alarms"))
             .data::<Page>(Page::Alarm)
             .icon(icon::from_name("alarm-symbolic"));
-
+        
         nav.insert()
             .text(fl!("stopwatch"))
             .data::<Page>(Page::Stopwatch)
             .icon(icon::from_name("chronometer-symbolic"));
-
+        
         nav.insert()
             .text(fl!("timer"))
             .data::<Page>(Page::Timer)
             .icon(icon::from_name("timer-symbolic"));
-
+        
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
             core,
@@ -326,6 +327,11 @@ impl cosmic::Application for AppModel {
                 self.timer_remaining = self.timer_duration;
             }
 
+            Message::SetTimerDuration(duration) => {
+                self.timer_duration = duration;
+                self.timer_remaining = duration;
+            }
+
             Message::AddAlarm => {
                 self.editing_alarm = Some(AlarmEdit {
                     id: None,
@@ -473,7 +479,10 @@ impl AppModel {
         } else {
             // Show alarm list
             let mut column = widget::column()
-                .push(widget::text::title1("⏰"))
+                .push(
+                    widget::icon::icon(widget::icon::from_name("alarm-symbolic").into())
+                        .size(128)
+                )
                 .push(widget::text::title2(fl!("alarms")))
                 .push(widget::button::standard(fl!("add-alarm")).on_press(Message::AddAlarm))
                 .spacing(space_m);
@@ -489,8 +498,14 @@ impl AppModel {
                             widget::toggler(alarm.enabled)
                                 .on_toggle(move |_| Message::ToggleAlarm(alarm.id))
                         )
-                        .push(widget::button::standard(fl!("edit-alarm")).on_press(Message::EditAlarm(alarm.id)))
-                        .push(widget::button::destructive(fl!("delete-alarm")).on_press(Message::DeleteAlarm(alarm.id)))
+                        .push(
+                            widget::button::standard(fl!("edit-alarm"))
+                                .on_press(Message::EditAlarm(alarm.id))
+                        )
+                        .push(
+                            widget::button::destructive(fl!("delete-alarm"))
+                                .on_press(Message::DeleteAlarm(alarm.id))
+                        )
                         .spacing(space_m)
                         .align_y(Vertical::Center);
                     
@@ -518,7 +533,9 @@ impl AppModel {
         let minute_str = edit.minute.to_string();
 
         widget::column()
-            .push(widget::text::title2(fl!("add-alarm")))
+            .push(widget::row()
+                .push(widget::text::title2(fl!("add-alarm")))
+            )
             .push(
                 widget::row()
                     .push(widget::text::body(fl!("hour")))
@@ -564,8 +581,8 @@ impl AppModel {
         );
         
         widget::column()
-            .push(widget::text::title1("⏱️"))
-            .push(widget::text::title1(time_str).align_x(Alignment::Center))
+            .push(widget::icon::icon(widget::icon::from_name("chronometer-symbolic").into()).size(128))
+            .push(widget::text::title1(time_str))
             .push(
                 widget::row()
                     .push(
@@ -580,58 +597,124 @@ impl AppModel {
                         widget::button::standard(fl!("reset"))
                             .on_press(Message::ResetStopwatch)
                     )
-                    .spacing(space_m)
+                    .spacing(space_l)
             )
             .spacing(space_m)
             .align_x(Alignment::Center)
-            .apply(widget::container)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
-            .padding(space_l)
             .into()
     }
 
     /// Timer view
     fn timer_view(&self) -> Element<Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
-        
+
         let time_str = format!("{:02}:{:02}", 
             self.timer_remaining.as_secs() / 60,
             self.timer_remaining.as_secs() % 60
         );
-        
-        widget::column()
-            .push(widget::text::title1("⏲️"))
-            .push(widget::text::title1(time_str).align_x(Alignment::Center))
+
+        let progress = if self.timer_duration.as_secs() > 0 {
+            self.timer_remaining.as_secs_f32() / self.timer_duration.as_secs_f32()
+        } else {
+            0.0
+        };
+
+        let timer_circle = canvas(TimerCircle { progress })
+            .width(Length::Fixed(200.0))
+            .height(Length::Fixed(200.0))
+            .into();
+
+        let presets = widget::row()
+            .push(widget::button::standard("1m").on_press(Message::SetTimerDuration(Duration::from_secs(60))))
+            .push(widget::button::standard("5m").on_press(Message::SetTimerDuration(Duration::from_secs(300))))
+            .push(widget::button::standard("10m").on_press(Message::SetTimerDuration(Duration::from_secs(600))))
+            .push(widget::button::standard("15m").on_press(Message::SetTimerDuration(Duration::from_secs(900))))
+            .push(widget::button::standard("30m").on_press(Message::SetTimerDuration(Duration::from_secs(1800))))
+            .spacing(space_m);
+
+        let custom_input = widget::column()
+            .push(widget::text::caption("Set Custom Time"))
             .push(
                 widget::row()
+                    .push(widget::text::body(fl!("hour")))
                     .push(
-                        widget::button::standard(fl!("start"))
-                            .on_press(Message::StartTimer)
+                        widget::text_input("", &(self.timer_duration.as_secs() / 3600).to_string())
+                            .on_input(|s| Message::SetTimerMinutes(s.parse::<u32>().unwrap_or(0) * 60))
+                            .width(Length::Fixed(60.0))
                     )
+                    .push(widget::text::body(fl!("minute")))
                     .push(
-                        widget::button::standard(fl!("stop"))
-                            .on_press(Message::StopTimer)
-                    )
-                    .push(
-                        widget::button::standard(fl!("reset"))
-                            .on_press(Message::ResetTimer)
+                        widget::text_input("", &((self.timer_duration.as_secs() % 3600) / 60).to_string())
+                            .on_input(|s| Message::SetTimerSeconds(s.parse().unwrap_or(0))) // Corrected to SetTimerSeconds
+                            .width(Length::Fixed(60.0))
                     )
                     .spacing(space_m)
+                    .align_y(Vertical::Center)
             )
-            .spacing(space_m)
+            .align_x(Alignment::Center)
+            .spacing(space_m);
+
+        let controls = widget::row()
+            .push(
+                widget::button::standard(fl!("start"))
+                    .on_press(Message::StartTimer)
+            )
+            .push(
+                widget::button::standard(fl!("stop"))
+                    .on_press(Message::StopTimer)
+            )
+            .push(
+                widget::button::standard(fl!("reset"))
+                    .on_press(Message::ResetTimer)
+            )
+            .spacing(space_l);
+
+        widget::column()
+            .push(timer_circle)
+            .push(widget::text::title1(time_str))
+            .push(
+                widget::icon::icon(widget::icon::from_name("timer-symbolic").into())
+                    .size(128)
+            )
+            .push(presets)
+            .push(widget::text::caption("Custom"))
+            .push(custom_input)
+            .push(controls)
+            .spacing(space_l)
             .align_x(Alignment::Center)
             .apply(widget::container)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Center)
             .align_y(Vertical::Center)
-            .padding(space_l)
+            .padding(space_m)
             .into()
     }
+} // End of impl AppModel
 
+struct TimerCircle { // Moved outside impl AppModel
+    progress: f32,
+}
+ 
+impl canvas::Program<Message> for TimerCircle {
+    type State = ();
+
+    fn draw(&self, _state: &Self::State, renderer: &Renderer, theme: &cosmic::iced::Theme, bounds: Rectangle, _cursor: mouse::Cursor) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let center = bounds.center();
+        let radius = (bounds.width.min(bounds.height) / 2.0) - 5.0;
+
+        let background = canvas::Path::circle(center, radius);
+        frame.stroke(&background, canvas::Stroke::default().with_color(theme.extended_palette().background.weak.color).with_width(6.0));
+
+        let arc = canvas::Path::new(|b| b.arc(canvas::path::Arc { center, radius, start_angle: cosmic::iced::Radians(-std::f32::consts::FRAC_PI_2), end_angle: cosmic::iced::Radians(-std::f32::consts::FRAC_PI_2 + (2.0 * std::f32::consts::PI * self.progress)) }));
+        frame.stroke(&arc, canvas::Stroke::default().with_color(theme.extended_palette().primary.strong.color).with_width(8.0).with_line_cap(canvas::LineCap::Round));
+
+        vec![frame.into_geometry()] // Keep Color, Rectangle, Renderer, Theme, mouse for canvas
+    }
+}
+
+impl AppModel {
     /// The about page for this app.
     pub fn about(&self) -> Element<Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
