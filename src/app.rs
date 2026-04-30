@@ -73,12 +73,14 @@ pub enum Message {
     StartStopwatch,
     StopStopwatch,
     ResetStopwatch,
-// Timer messages
-StartTimer,
-StopTimer,
-ResetTimer,
-SetTimerMinutes(u32),
-SetTimerSeconds(u32),
+    // Timer messages
+    StartTimer,
+    StopTimer,
+    ResetTimer,
+    #[allow(dead_code)]
+    SetTimerMinutes(u32),
+    #[allow(dead_code)]
+    SetTimerSeconds(u32),
 // Alarm messages
     AddAlarm,
     EditAlarm(u32),
@@ -171,7 +173,7 @@ impl cosmic::Application for AppModel {
     }
 
     /// Elements to pack at the start of the header bar.
-    fn header_start(&self) -> Vec<Element<Self::Message>> {
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
             menu::root(fl!("view")).apply(Element::from),
             menu::items(
@@ -188,7 +190,7 @@ impl cosmic::Application for AppModel {
         Some(&self.nav)
     }
 
-    fn context_drawer(&self) -> Option<cosmic::app::ContextDrawer<Self::Message>> {
+    fn context_drawer(&self) -> Option<cosmic::app::ContextDrawer<'_, Self::Message>> {
         if !self.core.window.show_context {
             return None;
         }
@@ -202,7 +204,7 @@ impl cosmic::Application for AppModel {
     }
 
     /// Describes the interface based on the current state of the application model.
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         let page = self
             .nav
             .data::<Page>(self.nav.active())
@@ -445,7 +447,7 @@ impl AppModel {
     }
 
     /// World Clock view
-    fn world_clock_view(&self) -> Element<Message> {
+    fn world_clock_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         widget::column()
@@ -464,7 +466,7 @@ impl AppModel {
     }
 
     /// Alarm view
-    fn alarm_view(&self) -> Element<Message> {
+    fn alarm_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         if let Some(edit) = &self.editing_alarm {
@@ -511,7 +513,7 @@ impl AppModel {
     }
 
     /// Alarm edit view
-    fn alarm_edit_view(&self, edit: &AlarmEdit) -> Element<Message> {
+    fn alarm_edit_view(&self, edit: &AlarmEdit) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         let hour_str = edit.hour.to_string();
@@ -554,7 +556,7 @@ impl AppModel {
             .padding(space_l)
             .into()
     }
-    fn stopwatch_view(&self) -> Element<Message> {
+    fn stopwatch_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         let time_str = format!("{:02}:{:02}:{:02}", 
@@ -594,7 +596,7 @@ impl AppModel {
     }
 
     /// Timer view
-    fn timer_view(&self) -> Element<Message> {
+    fn timer_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         let time_str = format!("{:02}:{:02}", 
@@ -633,7 +635,7 @@ impl AppModel {
     }
 
     /// The about page for this app.
-    pub fn about(&self) -> Element<Message> {
+    pub fn about(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = theme::active().cosmic().spacing;
 
         let icon = widget::svg(widget::svg::Handle::from_memory(APP_ICON));

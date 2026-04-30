@@ -42,6 +42,8 @@ pub fn send_stopwatch_notification(time: &str) {
         .show();
 }
 
+// This function is kept for future use when we want to send a notification on alarm set
+#[allow(dead_code)]
 pub fn send_alarm_set_notification(time: &str) {
     let _ = Notification::new()
         .summary("✅ Alarm Set")
