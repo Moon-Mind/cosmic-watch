@@ -18,7 +18,7 @@ pub fn send_alarm_notification(label: &str, time: &str) {
 
 pub fn send_timer_notification() {
     // Play completion sound
-    play_system_sound("complete");
+    play_system_sound("complete"); 
     
     let _ = Notification::new()
         .summary("🔔 Timer Finished")

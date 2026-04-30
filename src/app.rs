@@ -43,6 +43,18 @@ pub struct AppModel {
     next_alarm_id: u32,
     /// Alarm editing state
     editing_alarm: Option<AlarmEdit>,
+    /// World clock timezones
+    world_clocks: Vec<WorldClockItem>,
+    /// Stopwatch lap times
+    lap_times: Vec<Duration>,
+    /// Timer editing state
+    editing_timer: bool,
+    timer_edit_hours: u32,
+    timer_edit_minutes: u32,
+    timer_edit_seconds: u32,
+    /// Animation state
+    pulse_animation: f32,
+    animation_direction: i8,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +63,10 @@ pub struct AlarmItem {
     pub time: chrono::NaiveTime,
     pub label: String,
     pub enabled: bool,
+    #[allow(dead_code)]
+    pub repeat_days: [bool; 7],
+    #[allow(dead_code)]
+    pub snooze_minutes: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +75,15 @@ pub struct AlarmEdit {
     pub hour: u32,
     pub minute: u32,
     pub label: String,
+    pub repeat_days: [bool; 7], // Mon-Sun
+    pub snooze_minutes: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorldClockItem {
+    pub name: String,
+    pub timezone: String,
+    pub offset_hours: i32,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -77,11 +102,14 @@ pub enum Message {
     StartTimer,
     StopTimer,
     ResetTimer,
-    #[allow(dead_code)]
+    // Timer messages
+    SetTimerHours(u32),
     SetTimerMinutes(u32),
-    #[allow(dead_code)]
     SetTimerSeconds(u32),
-// Alarm messages
+    StartTimerEdit,
+    SaveTimerEdit,
+    CancelTimerEdit,
+    // Alarm messages
     AddAlarm,
     EditAlarm(u32),
     DeleteAlarm(u32),
@@ -91,6 +119,19 @@ pub enum Message {
     AlarmEditHour(u32),
     AlarmEditMinute(u32),
     AlarmEditLabel(String),
+    #[allow(dead_code)]
+    AlarmEditRepeatDay(u8, bool),
+    #[allow(dead_code)]
+    AlarmEditSnoozeMinutes(u32),
+    #[allow(dead_code)]
+    SnoozeAlarm(u32),
+    // World clock messages
+    AddWorldClock,
+    #[allow(dead_code)]
+    DeleteWorldClock(usize),
+    // Stopwatch messages
+    RecordLap,
+    ClearLaps,
 }
 
 /// Create a COSMIC application from the app model
@@ -165,6 +206,20 @@ impl cosmic::Application for AppModel {
             alarms: Vec::new(),
             next_alarm_id: 1,
             editing_alarm: None,
+            world_clocks: vec![
+                WorldClockItem {
+                    name: String::from("Local"),
+                    timezone: String::from("Local"),
+                    offset_hours: 0,
+                },
+            ],
+            lap_times: Vec::new(),
+            editing_timer: false,
+            timer_edit_hours: 0,
+            timer_edit_minutes: 5,
+            timer_edit_seconds: 0,
+            pulse_animation: 1.0,
+            animation_direction: 1,
         };
 
         let command = app.update_title();
@@ -281,6 +336,14 @@ impl cosmic::Application for AppModel {
                     }
                 }
 
+                // Update pulse animation
+                self.pulse_animation += 0.02 * self.animation_direction as f32;
+                if self.pulse_animation >= 1.2 {
+                    self.animation_direction = -1;
+                } else if self.pulse_animation <= 0.8 {
+                    self.animation_direction = 1;
+                }
+
                 // Check for alarm triggers
                 self.check_alarms();
             }
@@ -318,22 +381,14 @@ impl cosmic::Application for AppModel {
                 self.timer_remaining = self.timer_duration;
             }
 
-            Message::SetTimerMinutes(minutes) => {
-                self.timer_duration = Duration::from_secs(minutes as u64 * 60 + self.timer_duration.as_secs() % 60);
-                self.timer_remaining = self.timer_duration;
-            }
-
-            Message::SetTimerSeconds(seconds) => {
-                self.timer_duration = Duration::from_secs((self.timer_duration.as_secs() / 60) * 60 + seconds as u64);
-                self.timer_remaining = self.timer_duration;
-            }
-
             Message::AddAlarm => {
                 self.editing_alarm = Some(AlarmEdit {
                     id: None,
                     hour: self.current_time.hour(),
                     minute: self.current_time.minute(),
                     label: String::new(),
+                    repeat_days: [false; 7],
+                    snooze_minutes: 5,
                 });
             }
 
@@ -344,6 +399,8 @@ impl cosmic::Application for AppModel {
                         hour: alarm.time.hour(),
                         minute: alarm.time.minute(),
                         label: alarm.label.clone(),
+                        repeat_days: [false; 7],
+                        snooze_minutes: 5,
                     });
                 }
             }
@@ -376,6 +433,8 @@ impl cosmic::Application for AppModel {
                             time,
                             label: edit.label.clone(),
                             enabled: true,
+                            repeat_days: edit.repeat_days,
+                            snooze_minutes: edit.snooze_minutes,
                         });
                         self.next_alarm_id += 1;
                         
@@ -412,6 +471,109 @@ impl cosmic::Application for AppModel {
                 if let Some(edit) = &mut self.editing_alarm {
                     edit.label = label;
                 }
+            }
+
+            Message::AlarmEditRepeatDay(day, enabled) => {
+                if let Some(edit) = &mut self.editing_alarm {
+                    if day < 7 {
+                        edit.repeat_days[day as usize] = enabled;
+                    }
+                }
+            }
+
+            Message::AlarmEditSnoozeMinutes(minutes) => {
+                if let Some(edit) = &mut self.editing_alarm {
+                    edit.snooze_minutes = minutes.min(60);
+                }
+            }
+
+            Message::SnoozeAlarm(id) => {
+                if let Some(alarm) = self.alarms.iter_mut().find(|a| a.id == id) {
+                    // Snooze for the configured minutes
+                    let _ = notify_rust::Notification::new()
+                        .summary(&format!("😴 Snoozing {}", alarm.label))
+                        .body(&format!("Will ring again in {} minutes", alarm.snooze_minutes))
+                        .icon("alarm-symbolic")
+                        .timeout(notify_rust::Timeout::Milliseconds(2000))
+                        .show();
+                }
+            }
+
+            // Timer editing messages
+            Message::SetTimerHours(hours) => {
+                self.timer_edit_hours = hours.min(23);
+            }
+
+            Message::SetTimerMinutes(minutes) => {
+                // This is for timer editing mode
+                if self.editing_timer {
+                    self.timer_edit_minutes = minutes.min(59);
+                } else {
+                    self.timer_duration = Duration::from_secs(minutes as u64 * 60 + self.timer_duration.as_secs() % 60);
+                    self.timer_remaining = self.timer_duration;
+                }
+            }
+
+            Message::SetTimerSeconds(seconds) => {
+                // This is for timer editing mode
+                if self.editing_timer {
+                    self.timer_edit_seconds = seconds.min(59);
+                } else {
+                    self.timer_duration = Duration::from_secs((self.timer_duration.as_secs() / 60) * 60 + seconds as u64);
+                    self.timer_remaining = self.timer_duration;
+                }
+            }
+
+            Message::StartTimerEdit => {
+                self.editing_timer = true;
+                let total_secs = self.timer_duration.as_secs();
+                self.timer_edit_hours = (total_secs / 3600) as u32;
+                self.timer_edit_minutes = ((total_secs % 3600) / 60) as u32;
+                self.timer_edit_seconds = (total_secs % 60) as u32;
+            }
+
+            Message::SaveTimerEdit => {
+                self.editing_timer = false;
+                self.timer_duration = Duration::from_secs(
+                    self.timer_edit_hours as u64 * 3600 +
+                    self.timer_edit_minutes as u64 * 60 +
+                    self.timer_edit_seconds as u64
+                );
+                if !self.timer_running {
+                    self.timer_remaining = self.timer_duration;
+                }
+            }
+
+            Message::CancelTimerEdit => {
+                self.editing_timer = false;
+            }
+
+            // World clock messages
+            Message::AddWorldClock => {
+                // Add a new world clock with default values
+                let offset = self.world_clocks.len() as i32;
+                self.world_clocks.push(WorldClockItem {
+                    name: format!("City {}", self.world_clocks.len()),
+                    timezone: format!("UTC+{}", offset),
+                    offset_hours: offset,
+                });
+            }
+
+            Message::DeleteWorldClock(index) => {
+                if index < self.world_clocks.len() && self.world_clocks.len() > 1 {
+                    self.world_clocks.remove(index);
+                }
+            }
+
+            // Stopwatch lap messages
+            Message::RecordLap => {
+                if self.stopwatch_running {
+                    self.lap_times.push(self.stopwatch_time);
+                }
+            }
+
+            Message::ClearLaps => {
+                self.lap_times.clear();
             }
         }
         Task::none()
@@ -450,12 +612,43 @@ impl AppModel {
     fn world_clock_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
-        widget::column()
-            .push(widget::text::title1("🌍"))
-            .push(widget::text::title1(self.current_time.format("%H:%M:%S").to_string()).align_x(Alignment::Center))
+        let mut column = widget::column()
+            .push(widget::text::title1("🌍").size(48.0 * self.pulse_animation))
+            .push(widget::text::title1(self.current_time.format("%H:%M:%S").to_string())
+                .size(64.0 * self.pulse_animation)
+                .align_x(Alignment::Center))
             .push(widget::text::body(self.current_time.format("%A, %B %d, %Y").to_string()).align_x(Alignment::Center))
             .spacing(space_m)
-            .align_x(Alignment::Center)
+            .align_x(Alignment::Center);
+
+        // Add world clocks
+        if self.world_clocks.len() > 1 {
+            column = column.push(widget::divider::horizontal::default());
+            column = column.push(widget::text::title2("World Clocks").align_x(Alignment::Center));
+            
+            for (_i, clock) in self.world_clocks.iter().enumerate() {
+                let time_at_offset = self.current_time.with_timezone(
+                    &chrono::FixedOffset::east_opt(clock.offset_hours * 3600).unwrap_or(chrono::FixedOffset::east_opt(0).unwrap())
+                );
+                
+                let clock_row = widget::row()
+                    .push(widget::text::body(&clock.name).width(Length::FillPortion(1)))
+                    .push(widget::text::body(time_at_offset.format("%H:%M:%S").to_string()).width(Length::FillPortion(2)))
+                    .push(widget::text::body(&clock.timezone).width(Length::FillPortion(1)))
+                    .spacing(space_m)
+                    .align_y(Vertical::Center);
+                
+                column = column.push(clock_row);
+            }
+        }
+
+        column = column.push(
+            widget::button::standard("Add City")
+                .on_press(Message::AddWorldClock)
+                .width(Length::Shrink)
+        );
+
+        column
             .apply(widget::container)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -565,9 +758,11 @@ impl AppModel {
             self.stopwatch_time.as_secs() % 60
         );
         
-        widget::column()
-            .push(widget::text::title1("⏱️"))
-            .push(widget::text::title1(time_str).align_x(Alignment::Center))
+        let mut column = widget::column()
+            .push(widget::text::title1("⏱️").size(48.0 * self.pulse_animation))
+            .push(widget::text::title1(time_str.clone())
+                .size(72.0 * self.pulse_animation)
+                .align_x(Alignment::Center))
             .push(
                 widget::row()
                     .push(
@@ -582,10 +777,40 @@ impl AppModel {
                         widget::button::standard(fl!("reset"))
                             .on_press(Message::ResetStopwatch)
                     )
+                    .push(
+                        widget::button::standard("Lap")
+                            .on_press(Message::RecordLap)
+                    )
                     .spacing(space_m)
             )
             .spacing(space_m)
-            .align_x(Alignment::Center)
+            .align_x(Alignment::Center);
+
+        // Show lap times
+        if !self.lap_times.is_empty() {
+            column = column.push(widget::divider::horizontal::default());
+            column = column.push(widget::text::title2("Laps").align_x(Alignment::Center));
+            column = column.push(
+                widget::button::standard("Clear Laps")
+                    .on_press(Message::ClearLaps)
+                    .width(Length::Shrink)
+            );
+            
+            // Show last 10 laps in reverse order (most recent first)
+            let laps_to_show = self.lap_times.iter().rev().take(10);
+            for (idx, lap) in laps_to_show.enumerate() {
+                let lap_str = format!("{:02}:{:02}:{:02}.{:03}", 
+                    lap.as_secs() / 3600,
+                    (lap.as_secs() % 3600) / 60,
+                    lap.as_secs() % 60,
+                    (lap.as_millis() % 1000) as u32 / 10
+                );
+                let lap_num = self.lap_times.len() - idx;
+                column = column.push(widget::text::body(format!("Lap {}: {}", lap_num, lap_str)));
+            }
+        }
+
+        column
             .apply(widget::container)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -599,39 +824,121 @@ impl AppModel {
     fn timer_view(&self) -> Element<'_, Message> {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
-        let time_str = format!("{:02}:{:02}", 
-            self.timer_remaining.as_secs() / 60,
-            self.timer_remaining.as_secs() % 60
-        );
-        
-        widget::column()
-            .push(widget::text::title1("⏲️"))
-            .push(widget::text::title1(time_str).align_x(Alignment::Center))
-            .push(
+        if self.editing_timer {
+            // Timer edit view
+            let mut column = widget::column()
+                .push(widget::text::title1("⏲️ Set Timer").size(36.0))
+                .push(
+                    widget::row()
+                        .push(
+                            widget::column()
+                                .push(widget::text::body("Hours"))
+                                .push(
+                                    widget::text_input("", self.timer_edit_hours.to_string())
+                                        .on_input(|s| Message::SetTimerHours(s.parse().unwrap_or(0)))
+                                        .width(Length::Fixed(80.0))
+                                )
+                                .spacing(space_m)
+                                .align_x(Alignment::Center)
+                        )
+                        .push(
+                            widget::column()
+                                .push(widget::text::body("Minutes"))
+                                .push(
+                                    widget::text_input("", self.timer_edit_minutes.to_string())
+                                        .on_input(|s| Message::SetTimerMinutes(s.parse().unwrap_or(0)))
+                                        .width(Length::Fixed(80.0))
+                                )
+                                .spacing(space_m)
+                                .align_x(Alignment::Center)
+                        )
+                        .push(
+                            widget::column()
+                                .push(widget::text::body("Seconds"))
+                                .push(
+                                    widget::text_input("", self.timer_edit_seconds.to_string())
+                                        .on_input(|s| Message::SetTimerSeconds(s.parse().unwrap_or(0)))
+                                        .width(Length::Fixed(80.0))
+                                )
+                                .spacing(space_m)
+                                .align_x(Alignment::Center)
+                        )
+                        .spacing(space_l)
+                )
+                .push(
+                    widget::row()
+                        .push(widget::button::standard("Save").on_press(Message::SaveTimerEdit))
+                        .push(widget::button::standard("Cancel").on_press(Message::CancelTimerEdit))
+                        .spacing(space_m)
+                )
+                .spacing(space_l)
+                .align_x(Alignment::Center);
+
+            // Timer presets
+            column = column.push(widget::divider::horizontal::default());
+            column = column.push(widget::text::body("Quick Presets").align_x(Alignment::Center));
+            column = column.push(
                 widget::row()
-                    .push(
-                        widget::button::standard(fl!("start"))
-                            .on_press(Message::StartTimer)
-                    )
-                    .push(
-                        widget::button::standard(fl!("stop"))
-                            .on_press(Message::StopTimer)
-                    )
-                    .push(
-                        widget::button::standard(fl!("reset"))
-                            .on_press(Message::ResetTimer)
-                    )
+                    .push(widget::button::standard("1 min").on_press(Message::SetTimerMinutes(1)))
+                    .push(widget::button::standard("5 min").on_press(Message::SetTimerMinutes(5)))
+                    .push(widget::button::standard("10 min").on_press(Message::SetTimerMinutes(10)))
+                    .push(widget::button::standard("30 min").on_press(Message::SetTimerMinutes(30)))
+                    .push(widget::button::standard("1 hour").on_press(Message::SetTimerMinutes(60)))
                     .spacing(space_m)
-            )
-            .spacing(space_m)
-            .align_x(Alignment::Center)
-            .apply(widget::container)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
-            .padding(space_l)
-            .into()
+            );
+
+            column
+                .apply(widget::container)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center)
+                .padding(space_l)
+                .into()
+        } else {
+            let time_str = format!("{:02}:{:02}", 
+                self.timer_remaining.as_secs() / 60,
+                self.timer_remaining.as_secs() % 60
+            );
+            
+            let is_low = self.timer_remaining.as_secs() <= 10 && self.timer_running;
+            let timer_scale = if is_low { self.pulse_animation } else { 1.0 };
+            
+            widget::column()
+                .push(widget::text::title1("⏲️").size(48.0 * self.pulse_animation))
+                .push(widget::text::title1(time_str)
+                    .size(72.0 * timer_scale)
+                    .align_x(Alignment::Center))
+                .push(
+                    widget::row()
+                        .push(
+                            widget::button::standard(fl!("start"))
+                                .on_press(Message::StartTimer)
+                        )
+                        .push(
+                            widget::button::standard(fl!("stop"))
+                                .on_press(Message::StopTimer)
+                        )
+                        .push(
+                            widget::button::standard(fl!("reset"))
+                                .on_press(Message::ResetTimer)
+                        )
+                        .push(
+                            widget::button::standard("Edit")
+                                .on_press(Message::StartTimerEdit)
+                        )
+                        .spacing(space_m)
+                )
+                .spacing(space_m)
+                .align_x(Alignment::Center)
+                .apply(widget::container)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center)
+                .padding(space_l)
+                .into()
+        }
     }
 
     /// The about page for this app.
