@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::config;
 use crate::config::Config;
 use crate::fl;
 use crate::notifications;
 use chrono::Timelike;
+use chrono::TimeZone;
+use chrono::Offset;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
+use cosmic::iced::keyboard;
 use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, icon, menu, nav_bar};
@@ -34,10 +38,13 @@ pub struct AppModel {
     /// Stopwatch state
     stopwatch_time: Duration,
     stopwatch_running: bool,
+    stopwatch_paused: bool,
     /// Timer state
     timer_duration: Duration,
     timer_remaining: Duration,
     timer_running: bool,
+    timer_paused: bool,
+    timer_paused_remaining: Duration,
     /// Alarm state
     alarms: Vec<AlarmItem>,
     next_alarm_id: u32,
@@ -52,9 +59,6 @@ pub struct AppModel {
     timer_edit_hours: u32,
     timer_edit_minutes: u32,
     timer_edit_seconds: u32,
-    /// Animation state
-    pulse_animation: f32,
-    animation_direction: i8,
 }
 
 #[derive(Clone, Debug)]
@@ -92,15 +96,18 @@ pub enum Message {
     OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
+    SaveConfig,
     LaunchUrl(String),
     UpdateTime,
     // Stopwatch messages
     StartStopwatch,
     StopStopwatch,
+    PauseStopwatch,
     ResetStopwatch,
     // Timer messages
     StartTimer,
     StopTimer,
+    PauseTimer,
     ResetTimer,
     // Timer messages
     SetTimerHours(u32),
@@ -119,19 +126,18 @@ pub enum Message {
     AlarmEditHour(u32),
     AlarmEditMinute(u32),
     AlarmEditLabel(String),
-    #[allow(dead_code)]
     AlarmEditRepeatDay(u8, bool),
-    #[allow(dead_code)]
     AlarmEditSnoozeMinutes(u32),
-    #[allow(dead_code)]
     SnoozeAlarm(u32),
     // World clock messages
     AddWorldClock,
-    #[allow(dead_code)]
     DeleteWorldClock(usize),
+    SelectTimezone(usize, String),
     // Stopwatch messages
     RecordLap,
     ClearLaps,
+    // Navigation
+    NavTo(usize),
 }
 
 /// Create a COSMIC application from the app model
@@ -186,40 +192,66 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("timer-symbolic"));
 
         // Construct the app model with the runtime's core.
+        let config: Config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
+            .map(|context| match Config::get_entry(&context) {
+                Ok(config) => config,
+                Err((_errors, config)) => config,
+            })
+            .unwrap_or_default();
+
+        let alarms: Vec<AlarmItem> = config.alarms.iter().map(|ac| AlarmItem {
+            id: ac.id,
+            time: chrono::NaiveTime::from_hms_opt(ac.hour, ac.minute, 0).unwrap_or_default(),
+            label: ac.label.clone(),
+            enabled: ac.enabled,
+            repeat_days: ac.repeat_days,
+            snooze_minutes: ac.snooze_minutes,
+        }).collect();
+
+        let next_alarm_id = alarms.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+
+        let mut world_clocks = vec![
+            WorldClockItem {
+                name: String::from("Local"),
+                timezone: String::from("Local"),
+                offset_hours: 0,
+            },
+        ];
+        for wc in &config.world_clocks {
+            if let Ok(tz) = wc.timezone.parse::<chrono_tz::Tz>() {
+                let offset = tz.offset_from_utc_datetime(&chrono::Utc::now().naive_utc()).fix().local_minus_utc();
+                world_clocks.push(WorldClockItem {
+                    name: wc.name.clone(),
+                    timezone: wc.timezone.clone(),
+                    offset_hours: offset / 3600,
+                });
+            }
+        }
+
         let mut app = AppModel {
             core,
             context_page: ContextPage::default(),
             nav,
             key_binds: HashMap::new(),
-            config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
-                .map(|context| match Config::get_entry(&context) {
-                    Ok(config) => config,
-                    Err((_errors, config)) => config,
-                })
-                .unwrap_or_default(),
+            config,
             current_time: chrono::Local::now(),
             stopwatch_time: Duration::default(),
             stopwatch_running: false,
-            timer_duration: Duration::from_secs(300), // 5 minutes default
+            stopwatch_paused: false,
+            timer_duration: Duration::from_secs(300),
             timer_remaining: Duration::from_secs(300),
             timer_running: false,
-            alarms: Vec::new(),
-            next_alarm_id: 1,
+            timer_paused: false,
+            timer_paused_remaining: Duration::default(),
+            alarms,
+            next_alarm_id,
             editing_alarm: None,
-            world_clocks: vec![
-                WorldClockItem {
-                    name: String::from("Local"),
-                    timezone: String::from("Local"),
-                    offset_hours: 0,
-                },
-            ],
+            world_clocks,
             lap_times: Vec::new(),
             editing_timer: false,
             timer_edit_hours: 0,
             timer_edit_minutes: 5,
             timer_edit_seconds: 0,
-            pulse_animation: 1.0,
-            animation_direction: 1,
         };
 
         let command = app.update_title();
@@ -281,10 +313,29 @@ impl cosmic::Application for AppModel {
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| Message::UpdateConfig(update.config)),
+            cosmic::iced::event::listen().map(|event| {
+                if let cosmic::iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
+                    if modifiers.control() {
+                        match key {
+                            cosmic::iced::keyboard::Key::Character(c) => {
+                                match c.as_str() {
+                                    "1" => return Message::NavTo(0),
+                                    "2" => return Message::NavTo(1),
+                                    "3" => return Message::NavTo(2),
+                                    "4" => return Message::NavTo(3),
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Message::UpdateTime
+            }),
         ];
 
         // Add more frequent updates for stopwatch and timer
-        if self.stopwatch_running || self.timer_running {
+        if (self.stopwatch_running && !self.stopwatch_paused) || (self.timer_running && !self.timer_paused) {
             subscriptions.push(
                 cosmic::iced::time::every(Duration::from_millis(100)).map(|_| Message::UpdateTime),
             );
@@ -313,6 +364,34 @@ impl cosmic::Application for AppModel {
                 self.config = config;
             }
 
+            Message::SaveConfig => {
+                if let Ok(context) = cosmic_config::Config::new(Self::APP_ID, Config::VERSION) {
+                    let alarm_configs: Vec<config::AlarmConfig> = self.alarms.iter().map(|a| config::AlarmConfig {
+                        id: a.id,
+                        hour: a.time.hour(),
+                        minute: a.time.minute(),
+                        label: a.label.clone(),
+                        enabled: a.enabled,
+                        repeat_days: a.repeat_days,
+                        snooze_minutes: a.snooze_minutes,
+                    }).collect();
+                    
+                    let wc_configs: Vec<config::WorldClockConfig> = self.world_clocks.iter()
+                        .filter(|wc| wc.timezone != "Local")
+                        .map(|wc| config::WorldClockConfig {
+                            name: wc.name.clone(),
+                            timezone: wc.timezone.clone(),
+                        }).collect();
+                    
+                    let new_config = Config {
+                        alarms: alarm_configs,
+                        world_clocks: wc_configs,
+                        timer_presets: self.config.timer_presets.clone(),
+                    };
+                    let _ = new_config.write_entry(&context);
+                }
+            }
+
             Message::LaunchUrl(url) => match open::that_detached(&url) {
                 Ok(()) => {}
                 Err(err) => {
@@ -323,25 +402,16 @@ impl cosmic::Application for AppModel {
             Message::UpdateTime => {
                 self.current_time = chrono::Local::now();
                 
-                if self.stopwatch_running {
+                if self.stopwatch_running && !self.stopwatch_paused {
                     self.stopwatch_time += Duration::from_millis(100);
                 }
                 
-                if self.timer_running && self.timer_remaining > Duration::default() {
+                if self.timer_running && !self.timer_paused && self.timer_remaining > Duration::default() {
                     self.timer_remaining = self.timer_remaining.saturating_sub(Duration::from_millis(100));
                     if self.timer_remaining == Duration::default() {
                         self.timer_running = false;
-                        // Timer finished - send notification
                         notifications::send_timer_notification();
                     }
-                }
-
-                // Update pulse animation
-                self.pulse_animation += 0.02 * self.animation_direction as f32;
-                if self.pulse_animation >= 1.2 {
-                    self.animation_direction = -1;
-                } else if self.pulse_animation <= 0.8 {
-                    self.animation_direction = 1;
                 }
 
                 // Check for alarm triggers
@@ -350,11 +420,12 @@ impl cosmic::Application for AppModel {
 
             Message::StartStopwatch => {
                 self.stopwatch_running = true;
+                self.stopwatch_paused = false;
             }
 
             Message::StopStopwatch => {
                 self.stopwatch_running = false;
-                // Send notification with current time
+                self.stopwatch_paused = false;
                 let time_str = format!("{:02}:{:02}:{:02}", 
                     self.stopwatch_time.as_secs() / 3600,
                     (self.stopwatch_time.as_secs() % 3600) / 60,
@@ -363,21 +434,40 @@ impl cosmic::Application for AppModel {
                 notifications::send_stopwatch_notification(&time_str);
             }
 
+            Message::PauseStopwatch => {
+                self.stopwatch_paused = !self.stopwatch_paused;
+            }
+
             Message::ResetStopwatch => {
                 self.stopwatch_running = false;
+                self.stopwatch_paused = false;
                 self.stopwatch_time = Duration::default();
             }
 
             Message::StartTimer => {
-                self.timer_running = true;
+                if self.timer_paused {
+                    self.timer_paused = false;
+                    self.timer_remaining = self.timer_paused_remaining;
+                } else {
+                    self.timer_running = true;
+                }
             }
 
             Message::StopTimer => {
                 self.timer_running = false;
+                self.timer_paused = false;
+            }
+
+            Message::PauseTimer => {
+                if self.timer_running {
+                    self.timer_paused = true;
+                    self.timer_paused_remaining = self.timer_remaining;
+                }
             }
 
             Message::ResetTimer => {
                 self.timer_running = false;
+                self.timer_paused = false;
                 self.timer_remaining = self.timer_duration;
             }
 
@@ -407,12 +497,14 @@ impl cosmic::Application for AppModel {
 
             Message::DeleteAlarm(id) => {
                 self.alarms.retain(|alarm| alarm.id != id);
+                self.save_config();
             }
 
             Message::ToggleAlarm(id) => {
                 if let Some(alarm) = self.alarms.iter_mut().find(|a| a.id == id) {
                     alarm.enabled = !alarm.enabled;
                 }
+                self.save_config();
             }
 
             Message::SaveAlarm => {
@@ -421,13 +513,11 @@ impl cosmic::Application for AppModel {
                         .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap());
                     
                     if let Some(id) = edit.id {
-                        // Edit existing alarm
                         if let Some(alarm) = self.alarms.iter_mut().find(|a| a.id == id) {
                             alarm.time = time;
                             alarm.label = edit.label.clone();
                         }
                     } else {
-                        // Add new alarm
                         self.alarms.push(AlarmItem {
                             id: self.next_alarm_id,
                             time,
@@ -438,7 +528,6 @@ impl cosmic::Application for AppModel {
                         });
                         self.next_alarm_id += 1;
                         
-                        // Send confirmation notification
                         let _ = notify_rust::Notification::new()
                             .summary("Alarm Set")
                             .body(&format!("⏰ Alarm set for {}", time.format("%H:%M")))
@@ -448,6 +537,7 @@ impl cosmic::Application for AppModel {
                     }
                     
                     self.editing_alarm = None;
+                    self.save_config();
                 }
             }
 
@@ -550,30 +640,65 @@ impl cosmic::Application for AppModel {
 
             // World clock messages
             Message::AddWorldClock => {
-                // Add a new world clock with default values
-                let offset = self.world_clocks.len() as i32;
-                self.world_clocks.push(WorldClockItem {
-                    name: format!("City {}", self.world_clocks.len()),
-                    timezone: format!("UTC+{}", offset),
-                    offset_hours: offset,
-                });
+                let cities = [
+                    ("New York", "America/New_York"),
+                    ("London", "Europe/London"),
+                    ("Berlin", "Europe/Berlin"),
+                    ("Tokyo", "Asia/Tokyo"),
+                    ("Sydney", "Australia/Sydney"),
+                    ("Dubai", "Asia/Dubai"),
+                    ("Moscow", "Europe/Moscow"),
+                    ("Shanghai", "Asia/Shanghai"),
+                    ("Los Angeles", "America/Los_Angeles"),
+                    ("Paris", "Europe/Paris"),
+                ];
+                let idx = (self.world_clocks.len() - 1) % cities.len();
+                let (name, tz) = cities[idx];
+                if let Ok(parsed_tz) = tz.parse::<chrono_tz::Tz>() {
+                    let offset = parsed_tz.offset_from_utc_datetime(&chrono::Utc::now().naive_utc()).fix().local_minus_utc();
+                    self.world_clocks.push(WorldClockItem {
+                        name: name.to_string(),
+                        timezone: tz.to_string(),
+                        offset_hours: offset / 3600,
+                    });
+                    self.save_config();
+                }
             }
 
             Message::DeleteWorldClock(index) => {
                 if index < self.world_clocks.len() && self.world_clocks.len() > 1 {
                     self.world_clocks.remove(index);
+                    self.save_config();
                 }
             }
 
-            // Stopwatch lap messages
+            Message::SelectTimezone(index, timezone) => {
+                if index < self.world_clocks.len() {
+                    if let Ok(parsed_tz) = timezone.parse::<chrono_tz::Tz>() {
+                        let offset = parsed_tz.offset_from_utc_datetime(&chrono::Utc::now().naive_utc()).fix().local_minus_utc();
+                        self.world_clocks[index].timezone = timezone;
+                        self.world_clocks[index].offset_hours = offset / 3600;
+                        self.save_config();
+                    }
+                }
+            }
+
             Message::RecordLap => {
-                if self.stopwatch_running {
+                if self.stopwatch_running && !self.stopwatch_paused {
                     self.lap_times.push(self.stopwatch_time);
                 }
             }
 
             Message::ClearLaps => {
                 self.lap_times.clear();
+            }
+
+            Message::NavTo(index) => {
+                let nav_ids: Vec<_> = self.nav.iter().collect();
+                if index < nav_ids.len() {
+                    self.nav.activate(nav_ids[index]);
+                    return self.update_title();
+                }
             }
         }
         Task::none()
@@ -587,6 +712,35 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
+    /// Save current state to config
+    fn save_config(&mut self) {
+        if let Ok(context) = cosmic_config::Config::new("com.github.Moon-Mind.cosmic-watch", Config::VERSION) {
+            let alarm_configs: Vec<config::AlarmConfig> = self.alarms.iter().map(|a| config::AlarmConfig {
+                id: a.id,
+                hour: a.time.hour(),
+                minute: a.time.minute(),
+                label: a.label.clone(),
+                enabled: a.enabled,
+                repeat_days: a.repeat_days,
+                snooze_minutes: a.snooze_minutes,
+            }).collect();
+            
+            let wc_configs: Vec<config::WorldClockConfig> = self.world_clocks.iter()
+                .filter(|wc| wc.timezone != "Local")
+                .map(|wc| config::WorldClockConfig {
+                    name: wc.name.clone(),
+                    timezone: wc.timezone.clone(),
+                }).collect();
+            
+            let new_config = Config {
+                alarms: alarm_configs,
+                world_clocks: wc_configs,
+                timer_presets: self.config.timer_presets.clone(),
+            };
+            let _ = new_config.write_entry(&context);
+        }
+    }
+
     /// Check if any alarms should trigger
     fn check_alarms(&mut self) {
         let current_time = self.current_time.time();
@@ -613,32 +767,47 @@ impl AppModel {
         let cosmic_theme::Spacing { space_m, space_l, .. } = theme::active().cosmic().spacing;
         
         let mut column = widget::column()
-            .push(widget::text::title1("🌍").size(48.0 * self.pulse_animation))
+            .push(widget::text::title1("🌍").size(48.0))
             .push(widget::text::title1(self.current_time.format("%H:%M:%S").to_string())
-                .size(64.0 * self.pulse_animation)
+                .size(64.0)
                 .align_x(Alignment::Center))
             .push(widget::text::body(self.current_time.format("%A, %B %d, %Y").to_string()).align_x(Alignment::Center))
             .spacing(space_m)
             .align_x(Alignment::Center);
 
-        // Add world clocks
         if self.world_clocks.len() > 1 {
             column = column.push(widget::divider::horizontal::default());
             column = column.push(widget::text::title2("World Clocks").align_x(Alignment::Center));
             
-            for (_i, clock) in self.world_clocks.iter().enumerate() {
-                let time_at_offset = self.current_time.with_timezone(
-                    &chrono::FixedOffset::east_opt(clock.offset_hours * 3600).unwrap_or(chrono::FixedOffset::east_opt(0).unwrap())
-                );
+            for (i, clock) in self.world_clocks.iter().enumerate() {
+                let time_str: String = if clock.timezone == "Local" {
+                    self.current_time.format("%H:%M:%S").to_string()
+                } else if let Ok(tz) = clock.timezone.parse::<chrono_tz::Tz>() {
+                    self.current_time.with_timezone(&tz).format("%H:%M:%S").to_string()
+                } else {
+                    self.current_time.format("%H:%M:%S").to_string()
+                };
                 
-                let clock_row = widget::row()
+                let delete_btn = if i > 0 {
+                    Some(widget::button::icon(
+                        widget::icon::from_name("window-close-symbolic")
+                    ).on_press(Message::DeleteWorldClock(i)))
+                } else {
+                    None
+                };
+                
+                let mut row = widget::row()
                     .push(widget::text::body(&clock.name).width(Length::FillPortion(1)))
-                    .push(widget::text::body(time_at_offset.format("%H:%M:%S").to_string()).width(Length::FillPortion(2)))
-                    .push(widget::text::body(&clock.timezone).width(Length::FillPortion(1)))
+                    .push(widget::text::body(time_str.clone()).width(Length::FillPortion(2)))
+                    .push(widget::text::caption(&clock.timezone).width(Length::FillPortion(1)))
                     .spacing(space_m)
                     .align_y(Vertical::Center);
                 
-                column = column.push(clock_row);
+                if let Some(btn) = delete_btn {
+                    row = row.push(btn);
+                }
+                
+                column = column.push(row);
             }
         }
 
@@ -758,31 +927,44 @@ impl AppModel {
             self.stopwatch_time.as_secs() % 60
         );
         
-        let mut column = widget::column()
-            .push(widget::text::title1("⏱️").size(48.0 * self.pulse_animation))
-            .push(widget::text::title1(time_str.clone())
-                .size(72.0 * self.pulse_animation)
-                .align_x(Alignment::Center))
+        let mut buttons = widget::row()
             .push(
-                widget::row()
-                    .push(
-                        widget::button::standard(fl!("start"))
-                            .on_press(Message::StartStopwatch)
-                    )
-                    .push(
-                        widget::button::standard(fl!("stop"))
-                            .on_press(Message::StopStopwatch)
-                    )
-                    .push(
-                        widget::button::standard(fl!("reset"))
-                            .on_press(Message::ResetStopwatch)
-                    )
-                    .push(
-                        widget::button::standard("Lap")
-                            .on_press(Message::RecordLap)
-                    )
-                    .spacing(space_m)
+                widget::button::standard(if self.stopwatch_running && !self.stopwatch_paused { fl!("stop") } else { fl!("start") })
+                    .on_press(if self.stopwatch_running && !self.stopwatch_paused { Message::StopStopwatch } else { Message::StartStopwatch })
             )
+            .push(
+                widget::button::standard(if self.stopwatch_paused { "Resume" } else { "Pause" })
+                    .on_press(Message::PauseStopwatch)
+            )
+            .push(
+                widget::button::standard(fl!("reset"))
+                    .on_press(Message::ResetStopwatch)
+            )
+            .push(
+                widget::button::standard("Lap")
+                    .on_press(Message::RecordLap)
+            )
+            .spacing(space_m);
+        
+        if !self.stopwatch_running {
+            buttons = widget::row()
+                .push(
+                    widget::button::standard(fl!("start"))
+                        .on_press(Message::StartStopwatch)
+                )
+                .push(
+                    widget::button::standard(fl!("reset"))
+                        .on_press(Message::ResetStopwatch)
+                )
+                .spacing(space_m);
+        }
+        
+        let mut column = widget::column()
+            .push(widget::text::title1("⏱️").size(48.0))
+            .push(widget::text::title1(time_str.clone())
+                .size(72.0)
+                .align_x(Alignment::Center))
+            .push(buttons)
             .spacing(space_m)
             .align_x(Alignment::Center);
 
@@ -901,34 +1083,82 @@ impl AppModel {
                 self.timer_remaining.as_secs() % 60
             );
             
-            let is_low = self.timer_remaining.as_secs() <= 10 && self.timer_running;
-            let timer_scale = if is_low { self.pulse_animation } else { 1.0 };
+            let progress = if self.timer_duration.as_secs() > 0 {
+                self.timer_remaining.as_secs_f32() / self.timer_duration.as_secs_f32()
+            } else {
+                1.0
+            };
+            
+            let circle_size = 250.0;
+            let progress_color = if progress > 0.5 {
+                cosmic::iced::Color::from_rgb8(0x35, 0x84, 0xE4)
+            } else if progress > 0.25 {
+                cosmic::iced::Color::from_rgb8(0xF5, 0xA6, 0x23)
+            } else {
+                cosmic::iced::Color::from_rgb8(0xE4, 0x35, 0x35)
+            };
+            
+            let circle_display = widget::container(
+                widget::container(
+                    widget::column()
+                        .push(widget::text::title1(time_str).size(28.0).align_x(Alignment::Center))
+                        .push(widget::text::body(format!("{:.0}% remaining", progress * 100.0)).align_x(Alignment::Center))
+                        .spacing(space_m / 2)
+                )
+                .width(Length::Fixed(circle_size))
+                .height(Length::Fixed(circle_size))
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center)
+            )
+            .width(Length::Fixed(circle_size))
+            .height(Length::Fixed(circle_size))
+            .align_x(Horizontal::Center)
+            .align_y(Vertical::Center)
+            .style(move |_: &theme::Theme| {
+                widget::container::Style {
+                    border: cosmic::iced::Border {
+                        radius: cosmic::iced::Radius::from(circle_size / 2.0),
+                        width: 6.0,
+                        color: progress_color,
+                    },
+                    background: Some(cosmic::iced::Background::Color(cosmic::iced::Color {
+                        r: progress_color.r,
+                        g: progress_color.g,
+                        b: progress_color.b,
+                        a: 0.08,
+                    })),
+                    ..Default::default()
+                }
+            });
+            
+            let mut timer_buttons = widget::row()
+                .push(
+                    widget::button::standard(if self.timer_running && !self.timer_paused { fl!("stop") } else { fl!("start") })
+                        .on_press(if self.timer_running && !self.timer_paused { Message::StopTimer } else { Message::StartTimer })
+                );
+            
+            if self.timer_running {
+                timer_buttons = timer_buttons
+                    .push(
+                        widget::button::standard(if self.timer_paused { "Resume" } else { "Pause" })
+                            .on_press(Message::PauseTimer)
+                    );
+            }
+            
+            timer_buttons = timer_buttons
+                .push(
+                    widget::button::standard(fl!("reset"))
+                        .on_press(Message::ResetTimer)
+                )
+                .push(
+                    widget::button::standard("Edit")
+                        .on_press(Message::StartTimerEdit)
+                )
+                .spacing(space_m);
             
             widget::column()
-                .push(widget::text::title1("⏲️").size(48.0 * self.pulse_animation))
-                .push(widget::text::title1(time_str)
-                    .size(72.0 * timer_scale)
-                    .align_x(Alignment::Center))
-                .push(
-                    widget::row()
-                        .push(
-                            widget::button::standard(fl!("start"))
-                                .on_press(Message::StartTimer)
-                        )
-                        .push(
-                            widget::button::standard(fl!("stop"))
-                                .on_press(Message::StopTimer)
-                        )
-                        .push(
-                            widget::button::standard(fl!("reset"))
-                                .on_press(Message::ResetTimer)
-                        )
-                        .push(
-                            widget::button::standard("Edit")
-                                .on_press(Message::StartTimerEdit)
-                        )
-                        .spacing(space_m)
-                )
+                .push(circle_display)
+                .push(timer_buttons)
                 .spacing(space_m)
                 .align_x(Alignment::Center)
                 .apply(widget::container)

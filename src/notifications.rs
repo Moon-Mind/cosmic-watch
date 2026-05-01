@@ -1,11 +1,9 @@
 use notify_rust::{Notification, Timeout};
-use std::process::Command;
-use std::time::Duration;
 use std::io::Write;
+use std::time::Duration;
 
 pub fn send_alarm_notification(label: &str, time: &str) {
-    // Play alarm sound using system notification sound
-    play_system_sound("alarm");
+    play_rodio_sound("alarm");
     
     let _ = Notification::new()
         .summary("🔔 Alarm")
@@ -17,8 +15,7 @@ pub fn send_alarm_notification(label: &str, time: &str) {
 }
 
 pub fn send_timer_notification() {
-    // Play completion sound
-    play_system_sound("complete"); 
+    play_rodio_sound("complete");
     
     let _ = Notification::new()
         .summary("🔔 Timer Finished")
@@ -30,8 +27,7 @@ pub fn send_timer_notification() {
 }
 
 pub fn send_stopwatch_notification(time: &str) {
-    // Single notification sound
-    play_system_sound("message");
+    play_rodio_sound("message");
     
     let _ = Notification::new()
         .summary("⏱️ Stopwatch Stopped")
@@ -42,7 +38,6 @@ pub fn send_stopwatch_notification(time: &str) {
         .show();
 }
 
-// This function is kept for future use when we want to send a notification on alarm set
 #[allow(dead_code)]
 pub fn send_alarm_set_notification(time: &str) {
     let _ = Notification::new()
@@ -54,58 +49,82 @@ pub fn send_alarm_set_notification(time: &str) {
         .show();
 }
 
-fn play_system_sound(sound_type: &str) {
+fn play_rodio_sound(sound_type: &str) {
     let sound_type = sound_type.to_string();
     std::thread::spawn(move || {
+        // Try rodio first with generated tones
+        if let Ok((stream, stream_handle)) = rodio::OutputStream::try_default() {
+            let sink = rodio::Sink::try_new(&stream_handle);
+            if let Ok(sink) = sink {
+                // Generate simple beep tone as WAV data
+                let sample_rate = 44100;
+                let duration_secs = match sound_type.as_str() {
+                    "alarm" => 1.5,
+                    "complete" => 0.8,
+                    _ => 0.3,
+                };
+                let num_samples = (sample_rate as f32 * duration_secs) as usize;
+                let frequency = match sound_type.as_str() {
+                    "alarm" => 880.0,
+                    "complete" => 660.0,
+                    _ => 440.0,
+                };
+                
+                let samples: Vec<i16> = (0..num_samples).map(|i| {
+                    let t = i as f32 / sample_rate as f32;
+                    let envelope = if sound_type.as_str() == "alarm" {
+                        // Pulsing alarm pattern
+                        if (t * 4.0).sin() > 0.0 { 1.0 } else { 0.2 }
+                    } else {
+                        (1.0 - t / duration_secs).max(0.0)
+                    };
+                    (t * frequency * std::f32::consts::PI * 2.0).sin() as i16 * (30000.0 * envelope) as i16
+                }).collect();
+                
+                let source = rodio::buffer::SamplesBuffer::new(
+                    1,
+                    sample_rate,
+                    samples,
+                );
+                sink.append(source);
+                sink.sleep_until_end();
+                drop(stream);
+                return;
+            }
+        }
+        
+        // Fallback: try system sound commands
         let sound_name = match sound_type.as_str() {
             "alarm" => "alarm-clock-elapsed",
-            "complete" => "complete", 
+            "complete" => "complete",
             "message" => "message-new-instant",
             _ => "bell",
         };
         
-        // Pop!_OS specific sound methods (in order of preference)
         let methods = vec![
-            // Method 1: GNOME/Pop!_OS default sound player
             ("canberra-gtk-play", vec!["-i", sound_name]),
-            ("canberra-gtk-play", vec!["-i", "bell"]),
-            
-            // Method 2: PulseAudio (standard on Pop!_OS)
-            ("pactl", vec!["play-sample", sound_name]),
-            ("pactl", vec!["play-sample", "bell"]),
-            
-            // Method 3: Direct sound file playback
             ("paplay", vec!["/usr/share/sounds/freedesktop/stereo/bell.oga"]),
-            ("paplay", vec!["/usr/share/sounds/gnome/default/alerts/bark.ogg"]),
-            
-            // Method 4: ALSA fallback
             ("aplay", vec!["/usr/share/sounds/alsa/Front_Left.wav"]),
         ];
         
-        let mut success = false;
         for (cmd, args) in methods {
-            if let Ok(output) = Command::new(cmd).args(&args).output() {
-                if output.status.success() {
-                    success = true;
-                    break;
-                }
+            if std::process::Command::new(cmd).args(&args).output().is_ok() {
+                return;
             }
         }
         
-        // Pop!_OS fallback: Multiple beeps for different sound types
-        if !success {
-            let (repeat_count, interval_ms) = match sound_type.as_str() {
-                "alarm" => (4, 250),    // Urgent alarm pattern
-                "complete" => (2, 150), // Completion pattern  
-                _ => (1, 100),          // Single beep
-            };
-            
-            for i in 0..repeat_count {
-                print!("\x07");
-                std::io::stdout().flush().ok();
-                if i < repeat_count - 1 {
-                    std::thread::sleep(Duration::from_millis(interval_ms));
-                }
+        // Last resort: terminal beep
+        let repeat_count = match sound_type.as_str() {
+            "alarm" => 4,
+            "complete" => 2,
+            _ => 1,
+        };
+        
+        for i in 0..repeat_count {
+            print!("\x07");
+            std::io::stdout().flush().ok();
+            if i < repeat_count - 1 {
+                std::thread::sleep(Duration::from_millis(200));
             }
         }
     });
