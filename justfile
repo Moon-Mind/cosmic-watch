@@ -19,8 +19,8 @@ build-debug:
 run:
     cargo run
 
-# Install the application into the system
-install: build-release
+# Install the application into the system (build first with `cargo build --release`)
+install:
     install -Dm755 target/release/cosmic-watch {{rootdir}}{{prefix}}/bin/cosmic-watch
     install -Dm644 resources/icons/hicolor/scalable/apps/com.github.Moon-Mind.cosmic-watch.svg {{rootdir}}{{prefix}}/share/icons/hicolor/scalable/apps/com.github.Moon-Mind.cosmic-watch.svg
     install -Dm644 com.github.Moon-Mind.cosmic-watch.desktop {{rootdir}}{{prefix}}/share/applications/com.github.Moon-Mind.cosmic-watch.desktop
