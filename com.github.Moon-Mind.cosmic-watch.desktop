@@ -2,7 +2,7 @@
 Name=Cosmic Watch
 Comment=A clock, alarm, stopwatch, and timer application for COSMIC
 Type=Application
-Icon=cosmic-watch
+Icon=com.github.Moon-Mind.cosmic-watch
 Exec=cosmic-watch
 Terminal=false
 StartupNotify=true

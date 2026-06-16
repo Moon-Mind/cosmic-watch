@@ -22,8 +22,8 @@ run:
 # Install the application into the system
 install: build-release
     install -Dm755 target/release/cosmic-watch {{rootdir}}{{prefix}}/bin/cosmic-watch
-    install -Dm644 resources/icons/hicolor/scalable/apps/icon.svg {{rootdir}}{{prefix}}/share/icons/hicolor/scalable/apps/cosmic-watch.svg
-    install -Dm644 cosmic-watch.desktop {{rootdir}}{{prefix}}/share/applications/cosmic-watch.desktop
+    install -Dm644 resources/icons/hicolor/scalable/apps/com.github.Moon-Mind.cosmic-watch.svg {{rootdir}}{{prefix}}/share/icons/hicolor/scalable/apps/com.github.Moon-Mind.cosmic-watch.svg
+    install -Dm644 com.github.Moon-Mind.cosmic-watch.desktop {{rootdir}}{{prefix}}/share/applications/com.github.Moon-Mind.cosmic-watch.desktop
 
 # Vendor dependencies locally
 vendor:
