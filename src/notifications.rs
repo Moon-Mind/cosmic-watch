@@ -14,6 +14,18 @@ pub fn send_alarm_notification(label: &str, time: &str) {
         .show();
 }
 
+pub fn send_stopwatch_notification(time: &str) {
+    play_rodio_sound("message");
+
+    let _ = Notification::new()
+        .summary("⏱️ Stopwatch Stopped")
+        .body(&format!("Final time: {}", time))
+        .icon("alarm-symbolic")
+        .timeout(Timeout::Milliseconds(3000))
+        .urgency(notify_rust::Urgency::Normal)
+        .show();
+}
+
 pub fn send_timer_notification() {
     play_rodio_sound("complete");
     
@@ -23,18 +35,6 @@ pub fn send_timer_notification() {
         .icon("timer-symbolic")
         .timeout(Timeout::Milliseconds(8000))
         .urgency(notify_rust::Urgency::Critical)
-        .show();
-}
-
-pub fn send_stopwatch_notification(time: &str) {
-    play_rodio_sound("message");
-    
-    let _ = Notification::new()
-        .summary("⏱️ Stopwatch Stopped")
-        .body(&format!("Final time: {}", time))
-        .icon("chronometer-symbolic")
-        .timeout(Timeout::Milliseconds(3000))
-        .urgency(notify_rust::Urgency::Normal)
         .show();
 }
 
@@ -96,7 +96,7 @@ fn play_rodio_sound(sound_type: &str) {
         // Fallback: try system sound commands
         let sound_name = match sound_type.as_str() {
             "alarm" => "alarm-clock-elapsed",
-            "complete" => "complete",
+        "complete" => "complete",
             "message" => "message-new-instant",
             _ => "bell",
         };

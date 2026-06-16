@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-watch"
-version = "0.1.0"
+version = "0.29.1"
 dependencies = [
  "chrono",
  "chrono-tz",
