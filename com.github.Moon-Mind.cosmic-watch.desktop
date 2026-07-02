@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Cosmic Watch
+Comment=A clock, timer, stopwatch, alarm, and world clock app for COSMIC
+Type=Application
+Icon=com.github.Moon-Mind.cosmic-watch
+Exec=cosmic-watch %F
+Terminal=false
+StartupNotify=true
+Categories=Utility;Clock;
+Keywords=COSMIC;Clock;Timer;Alarm;Stopwatch;WorldClock;
