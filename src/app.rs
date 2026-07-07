@@ -91,7 +91,7 @@ const ALARM_SOUNDS: &[&str] = &[
 const SNOOZE_OPTIONS: &[u32] = &[1, 3, 5, 9, 15, 30, 60];
 const SNOOZE_STR: &[&str] = &["1 min", "3 min", "5 min", "9 min", "15 min", "30 min", "60 min"];
 
-const DAY_LABELS: &[&str] = &["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_LABELS: &[&str] = &["S", "M", "T", "W", "T", "F", "S"];
 
 
 
@@ -1430,7 +1430,7 @@ impl AppModel {
                 widget::text::body(fl!("no-alarms"))
                     .apply(widget::container)
                     .width(Length::Fill)
-                    .padding(space_l)
+            .padding([space_l, space_l, space_l + 8, space_l])
             );
         } else {
             for alarm in &self.alarms {
@@ -1573,27 +1573,11 @@ impl AppModel {
 
         // Repeat day buttons
         let all_on = edit.repeat_days.iter().all(|&d| d);
-        let repeat_summary = if all_on {
-            fl!("every-day")
-        } else {
-            let mut days = Vec::new();
-            for (i, &on) in edit.repeat_days.iter().enumerate() {
-                if on {
-                    days.push(DAY_LABELS[i]);
-                }
-            }
-            if days.is_empty() {
-                String::from("—")
-            } else {
-                days.join(" ")
-            }
-        };
 
         // "Every Day" quick toggle
-        let all_on = edit.repeat_days.iter().all(|&d| d);
         let every_day = widget::mouse_area(
             widget::container(
-                widget::text::body(fl!("every-day")).size(13.0)
+                widget::text::body(fl!("every-day")).size(12.0)
                     .apply(widget::container)
                     .padding([space_s, space_m])
             )
@@ -1615,15 +1599,26 @@ impl AppModel {
         )
         .on_press(Message::AlarmEditEveryDay(!all_on));
 
-        let mut day_row = widget::row().spacing(space_s).align_y(Vertical::Center);
+        let day_sz = 34.0;
+        let mut day_row = widget::row().align_y(Vertical::Center);
         for (i, &label) in DAY_LABELS.iter().enumerate() {
+            if i > 0 {
+                day_row = day_row.push(widget::horizontal_space());
+            }
             let is_on = edit.repeat_days[i];
             let day_btn = widget::mouse_area(
                 widget::container(
-                    widget::text::body(label).size(13.0)
-                        .apply(widget::container)
-                        .padding([space_s + 4, space_s + 2])
+                    widget::text::body(label).size(14.0)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Alignment::Center)
+                        .align_y(Vertical::Center)
                 )
+                .width(Length::Fixed(day_sz))
+                .height(Length::Fixed(day_sz))
+                .padding(0)
+                .align_x(Alignment::Center)
+                .align_y(Vertical::Center)
                 .style(move |_: &theme::Theme| widget::container::Style {
                     background: Some(cosmic::iced::Background::Color(
                         if is_on {
@@ -1633,7 +1628,7 @@ impl AppModel {
                         }
                     )),
                     border: cosmic::iced::Border {
-                        radius: cosmic::iced::Radius::from(20.0),
+                        radius: cosmic::iced::Radius::from(day_sz / 2.0),
                         width: 0.0,
                         color: cosmic::iced::Color::TRANSPARENT,
                     },
@@ -1648,22 +1643,21 @@ impl AppModel {
         let repeat_section = widget::column()
             .push(widget::text::caption(fl!("repeat")).size(12.0))
             .push(
-                widget::scrollable::horizontal(
-                    widget::row()
-                        .push(every_day)
-                        .push(day_row)
-                        .spacing(space_s)
-                        .align_y(Vertical::Center)
-                )
-                .width(Length::Fill)
-                .height(Length::Fixed(48.0))
+                widget::column()
+                    .push(
+                        widget::row()
+                            .push(widget::container(every_day).width(Length::Fill))
+                            .width(Length::Fill)
+                    )
+                    .push(day_row.width(Length::Fill))
+                    .spacing(space_s)
             )
-            .push(widget::text::caption(repeat_summary.clone()).size(11.0))
             .spacing(space_s);
 
         // Label input
         let label_input = widget::text_input(fl!("alarm-label"), &edit.label)
-            .on_input(Message::AlarmEditLabel);
+            .on_input(Message::AlarmEditLabel)
+            .padding(space_s);
 
         // Sound selector (dropdown)
         let sound_index = ALARM_SOUNDS.iter().position(|&s| s == edit.sound);
@@ -1694,14 +1688,9 @@ impl AppModel {
             widget::column()
                 .push(snooze_check)
                 .push(
-                    widget::row()
-                        .push(widget::horizontal_space().width(Length::Fixed(40.0)))
-                        .push(
-                            widget::column()
-                                .push(widget::text::caption(fl!("snooze-duration")).size(12.0))
-                                .push(snooze_duration_dropdown)
-                                .spacing(space_s)
-                        )
+                    widget::column()
+                        .push(widget::text::caption(fl!("snooze-duration")).size(12.0))
+                        .push(snooze_duration_dropdown)
                         .spacing(space_s)
                 )
                 .spacing(space_s)
@@ -1732,6 +1721,7 @@ impl AppModel {
             )
             .push(
                 widget::button::suggested(fl!("save-alarm"))
+                    .leading_icon(cosmic::widget::icon::from_name("object-select-symbolic"))
                     .on_press(Message::SaveAlarm)
                     .width(Length::Shrink)
             )
