@@ -1720,10 +1720,10 @@ impl AppModel {
                     .width(Length::Shrink)
             )
             .push(
-                widget::button::suggested(fl!("save-alarm"))
-                    .leading_icon(cosmic::widget::icon::from_name("object-select-symbolic"))
+                widget::button::suggested("Save")
                     .on_press(Message::SaveAlarm)
-                    .width(Length::Shrink)
+                    .width(Length::Fixed(80.0))
+                    .height(Length::Fixed(34.0))
             )
             .spacing(space_m)
             .align_y(Vertical::Center);
