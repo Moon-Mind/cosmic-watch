@@ -345,59 +345,54 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Anal
             );
         }
 
-        // Hour hand
-        let hour_angle = ((self.time.hour() as f32 % 12.0) * 30.0 + self.time.minute() as f32 * 0.5 - 90.0) * PI / 180.0;
-        let hour_len = radius * 0.5;
         let hand_color = if self.is_day {
             cosmic::iced::Color::from_rgb8(0x11, 0x11, 0x11)
         } else {
             cosmic::iced::Color::from_rgb8(0xEE, 0xEE, 0xEE)
         };
-        let p1 = cosmic::iced::Point::new(
-            center.x - hour_len * 0.3 * hour_angle.cos(),
-            center.y - hour_len * 0.3 * hour_angle.sin(),
-        );
-        let p2 = cosmic::iced::Point::new(
-            center.x + hour_len * hour_angle.cos(),
-            center.y + hour_len * hour_angle.sin(),
-        );
-        frame.stroke(
-            &canvas::Path::line(p1, p2),
-            canvas::Stroke::default().with_color(hand_color).with_width(4.0).with_line_cap(canvas::LineCap::Round),
-        );
+        let red = cosmic::iced::Color::from_rgb8(0xE4, 0x35, 0x35);
+
+        // Hour hand
+        let hour_angle = ((self.time.hour() as f32 % 12.0) * 30.0 + self.time.minute() as f32 * 0.5) * PI / 180.0;
+        frame.with_save(|frame| {
+            frame.translate(cosmic::iced::Vector::new(center.x, center.y));
+            frame.rotate(-hour_angle);
+            frame.stroke(
+                &canvas::Path::line(
+                    cosmic::iced::Point::new(0.0, -radius * 0.15),
+                    cosmic::iced::Point::new(0.0, -radius * 0.5),
+                ),
+                canvas::Stroke::default().with_color(hand_color).with_width(4.0).with_line_cap(canvas::LineCap::Round),
+            );
+        });
 
         // Minute hand
-        let min_angle = (self.time.minute() as f32 * 6.0 + self.time.second() as f32 * 0.1 - 90.0) * PI / 180.0;
-        let min_len = radius * 0.7;
-        let mp1 = cosmic::iced::Point::new(
-            center.x - min_len * 0.1 * min_angle.cos(),
-            center.y - min_len * 0.1 * min_angle.sin(),
-        );
-        let mp2 = cosmic::iced::Point::new(
-            center.x + min_len * min_angle.cos(),
-            center.y + min_len * min_angle.sin(),
-        );
-        frame.stroke(
-            &canvas::Path::line(mp1, mp2),
-            canvas::Stroke::default().with_color(hand_color).with_width(2.5).with_line_cap(canvas::LineCap::Round),
-        );
+        let min_angle = (self.time.minute() as f32 * 6.0 + self.time.second() as f32 * 0.1) * PI / 180.0;
+        frame.with_save(|frame| {
+            frame.translate(cosmic::iced::Vector::new(center.x, center.y));
+            frame.rotate(-min_angle);
+            frame.stroke(
+                &canvas::Path::line(
+                    cosmic::iced::Point::new(0.0, -radius * 0.07),
+                    cosmic::iced::Point::new(0.0, -radius * 0.7),
+                ),
+                canvas::Stroke::default().with_color(hand_color).with_width(2.5).with_line_cap(canvas::LineCap::Round),
+            );
+        });
 
         // Second hand (red, sweeping)
-        let sec_angle = (self.time.second() as f32 * 6.0 - 90.0) * PI / 180.0;
-        let sec_len = radius * 0.8;
-        let red = cosmic::iced::Color::from_rgb8(0xE4, 0x35, 0x35);
-        let p1 = cosmic::iced::Point::new(
-            center.x - sec_len * 0.2 * sec_angle.cos(),
-            center.y - sec_len * 0.2 * sec_angle.sin(),
-        );
-        let p2 = cosmic::iced::Point::new(
-            center.x + sec_len * sec_angle.cos(),
-            center.y + sec_len * sec_angle.sin(),
-        );
-        frame.stroke(
-            &canvas::Path::line(p1, p2),
-            canvas::Stroke::default().with_color(red).with_width(1.5).with_line_cap(canvas::LineCap::Round),
-        );
+        let sec_angle = (self.time.second() as f32 * 6.0) * PI / 180.0;
+        frame.with_save(|frame| {
+            frame.translate(cosmic::iced::Vector::new(center.x, center.y));
+            frame.rotate(-sec_angle);
+            frame.stroke(
+                &canvas::Path::line(
+                    cosmic::iced::Point::new(0.0, -radius * 0.16),
+                    cosmic::iced::Point::new(0.0, -radius * 0.8),
+                ),
+                canvas::Stroke::default().with_color(red).with_width(1.5).with_line_cap(canvas::LineCap::Round),
+            );
+        });
 
         // Center dot
         frame.fill(&canvas::Path::circle(center, 3.0), red);
