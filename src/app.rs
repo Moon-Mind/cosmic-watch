@@ -1278,8 +1278,7 @@ impl AppModel {
             .on_exit(Message::HoverClock(None));
 
             let card_element: Element<'_, Message> = widget::container(card)
-                .width(Length::Fill)
-                .max_width(280.0)
+                .width(Length::Fixed(220.0))
                 .into();
 
             grid_cards.push(card_element);
