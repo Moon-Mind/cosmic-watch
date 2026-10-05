@@ -27,25 +27,6 @@ cd cosmic-watch
 sudo just install
 
 
-## Project Structure
-
-```
-src/
-├── main.rs           # Entry point
-├── app.rs            # UI and application logic
-├── config.rs         # Persistent config
-├── notifications.rs  # System notifications
-└── i18n.rs           # Localization
-i18n/
-└── en/
-    └── cosmic_watch.ftl  # UI strings
-resources/
-├── app.desktop
-├── app.metainfo.xml
-└── icons/
-    └── hicolor/scalable/apps/
-```
-
 ## License
 
 MPL-2.0
